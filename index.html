@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="./libs/d3.js"></script>
+    <script src="./libs/d3jstopojson.v1.js"></script>
+    <title>MA Map Visualization</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+        h1, h3 {
+            text-align: center;
+            margin: 0;
+            padding: 10px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            max-width: 800px;
+        }
+        .map {
+            margin: 10px 0;
+        }
+        #tooltip {
+            position: absolute;
+            opacity: 0;
+            background: white;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        path {
+            stroke-width: 0.5px;
+            stroke: black;
+        }
+        path:hover {
+            opacity: 0.8;
+            stroke: black;
+            stroke-width: 1.5px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Massachusetts Geospatial Visualizations</h1>
+    <h3>Kothapalli Vikas Reddy</h3>
+    
+    <div id="tooltip"></div>
+    <div class="container">
+        <div class="map" id="mapA"></div>
+        <div class="map" id="mapB"></div>
+        <div class="map" id="mapC"></div>
+    </div>
+
+    <script>
+        const svgWidth = 600;
+        const svgHeight = 400;
+        
+        const MA_counties = "./data/towns.topojson";
+        const gini_index = "./data/gini_index.csv";
+        
+        const fipsToCounty = {
+            "25001": "Barnstable County",
+            "25003": "Berkshire County",
+            "25005": "Bristol County",
+            "25007": "Dukes County",
+            "25009": "Essex County",
+            "25011": "Franklin County",
+            "25013": "Hampden County",
+            "25015": "Hampshire County",
+            "25017": "Middlesex County",
+            "25019": "Nantucket County",
+            "25021": "Norfolk County",
+            "25023": "Plymouth County",
+            "25025": "Suffolk County",
+            "25027": "Worcester County"
+        };
+
+        Promise.all([
+            d3.json(MA_counties),
+            d3.csv(gini_index)
+        ]).then(data => {
+            const topoData = data[0];
+            const giniData = data[1];
+            const giniDataSimplified = giniData.map(d => ({
+                ...d,
+                county: d['Geographic Area Name'].replace(', Massachusetts', '').trim()
+            }));
+            
+            const createMap = (data, containerId, width, height, fillScale, tooltipText) => {
+                const svg = d3.select(containerId).append("svg")
+                    .attr("width", width)
+                    .attr("height", height);
+                
+                const geojson = topojson.feature(data, data.objects.ma);
+                
+                const projection = d3.geoMercator()
+                    .fitSize([width, height], geojson);
+                
+                const path = d3.geoPath().projection(projection);
+                
+                svg.selectAll("path")
+                    .data(geojson.features)
+                    .enter().append("path")
+                    .attr("d", path)
+                    .attr("fill", d => fillScale(d))
+                    .on("mouseenter", (event, d) => {
+                        const tooltip = d3.select("#tooltip");
+                        tooltip.style("opacity", 1)
+                               .style("left", (event.pageX + 5) + "px")
+                               .style("top", (event.pageY - 28) + "px")
+                               .html(tooltipText(d));
+                    })
+                    .on("mouseleave", () => {
+                        d3.select("#tooltip").style("opacity", 0);
+                    });
+            };
+            
+            const populationScale = d3.scaleLinear().domain([0, 50000]).range(["#e0f3db", "#0868ac"]);
+            const popChangeScale = d3.scaleDiverging().domain([-2000, 0, 2000]).interpolator(d3.interpolateRdBu);
+            const giniScale = d3.scaleSequential(d3.interpolateViridis).domain([0.3, 0.6]);
+
+            const tooltipTextMapA = d => `Town: ${d.properties.TOWN}<br>Population 1980: ${d.properties.POP1980}`;
+            const tooltipTextMapB = d => `Town: ${d.properties.TOWN}<br>Pop Change (1980-2010): ${d.properties.POP2010 - d.properties.POP1980}`;
+            const tooltipTextMapC = d => {
+                const countyName = String(fipsToCounty[d.properties.FIPS_STCO]);
+                const giniInfo = giniDataSimplified.find(g => String(g.county) === countyName);
+                return `Town: ${d.properties.TOWN}<br>County: ${countyName || "N/A"}<br>Gini Index 2019: ${giniInfo ? giniInfo['Estimate!!Gini Index'] : "N/A"}`;
+            };
+            
+            createMap(topoData, "#mapA", svgWidth, svgHeight, d => populationScale(d.properties.POP1980), tooltipTextMapA);
+            createMap(topoData, "#mapB", svgWidth, svgHeight, d => popChangeScale(d.properties.POP2010 - d.properties.POP1980), tooltipTextMapB);
+            createMap(topoData, "#mapC", svgWidth, svgHeight, d => {
+                const countyName = fipsToCounty[d.properties.FIPS_STCO];
+                const giniInfo = giniDataSimplified.find(g => g.county === countyName);
+                return giniInfo ? giniScale(giniInfo['Estimate!!Gini Index']) : "#ccc";
+            }, tooltipTextMapC);
+        }).catch(error => {
+            console.error("Error loading or processing data:", error);
+        });
+    </script>
+</body>
+
+</html>
